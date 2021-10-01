@@ -1,205 +1,4 @@
-//module temp (
-//    input clk,//system clock
-//    input res,//System reset                                    
-//    inout dht22,//dht22 temperature and humidity sensor single bus
-//	 output reg [31:0] data_out//High temperature
-// );                                                                             
-////parameter define 
-//parameter  POWER_ON_NUM = 1000_000;//Power-on delay waiting time, unit us
-////Each state of the state machine                     
-//parameter st_power_on_wait = 3'd0;//wait for the Power-up 000
-//parameter st_low_500us = 3'd1;     //host sends a low level 500us 001
-//parameter st_high_40us = 3'd2;//master releases the bus 40us 010
-//parameter st_rec_low_83us = 3'd3;     //low level in response to receiving 83us 011
-//parameter st_rec_high_87us = 3'd4;//wait 87us high (ready to receive data) 100
-//parameter st_rec_data = 3'd5;     //101 receives 40-bit data
-//parameter st_delay = 3'd6;//wait delay, delay after the completion of re-operation DHT22 110
-//
-////reg define
-//reg [2:0] cur_state;//Current state 3-bit register
-//reg [2:0] next_state;//Next state
-//                                    
-//reg [4:0] clk_cnt;//Frequency counter
-//reg clk_1m;//1Mhz clock
-//reg [20:0] us_cnt;//1 microsecond counter
-//reg us_cnt_clr;//1 microsecond counter clear signal
-//                                    
-//reg [39:0] data_temp;//Buffer the received data
-//reg step;//Data collection status
-//reg [5:0] data_cnt;//Counter for receiving data
-//
-//reg dht22_buffer;//DHT22 output signal
-//reg dht22_d0;//DHT22 input signal register 0
-//reg dht22_d1;//DHT22 input signal register 1
-//
-////wire define                       
-//wire dht22_pos;//DHT22 rising edge
-//wire dht22_neg;//DHT22 falling edge
-//
-////************************************************ *****
-////** main code
-////************************************************ *****
-//
-//assign dht22 = dht22_buffer;
-//assign dht22_pos = ~dht22_d1 & dht22_d0;//Collect the rising edge
-//assign dht22_neg = dht22_d1 & ~dht22_d0;//Collect the falling edge
-//
-////Get 1Mhz frequency division clock
-//always @ (posedge clk or negedge res) begin//posedge rising edge trigger or negedge falling edge trigger
-//    if (!res) begin
-//        clk_cnt <= 5'd0;
-//        clk_1m  <= 1'b0;
-//    end 
-//    else if (clk_cnt < 5'd24) 
-//        clk_cnt <= clk_cnt + 1'b1;       
-//    else begin
-//        clk_cnt <= 5'd0;
-//        clk_1m  <= ~ clk_1m;
-//    end 
-//end
-//
-////Register the DHT22 input signal twice for edge detection
-//always @ (posedge clk_1m or negedge res) begin
-//    if (!res) begin
-//        dht22_d0 <= 1'b1;
-//        dht22_d1 <= 1'b1;
-//    end 
-//    else begin
-//        dht22_d0 <= dht22;
-//        dht22_d1 <= dht22_d0;
-//    end 
-//end 
-//
-////1 microsecond counter
-//always @ (posedge clk_1m or negedge res) begin
-//    if (!res)
-//        us_cnt <= 21'd0;
-//    else if (us_cnt_clr)
-//        us_cnt <= 21'd0;
-//    else 
-//        us_cnt <= us_cnt + 1 ;
-//end 
-//
-////State jump
-//always @ (posedge clk_1m or negedge res) begin
-//    if (!res)
-//        cur_state <= st_power_on_wait;
-//    else 
-//        cur_state <= next_state;
-//end 
-//
-////The state machine reads DHT11 data
-//always @ (posedge clk_1m or negedge res) begin
-//    if(!res) begin
-//        next_state <= st_power_on_wait;
-//        data_temp <= 40'd0;
-//        step         <= 1'b0; 
-//        us_cnt_clr   <= 1'b0;
-//        data_cnt     <= 6'd0;
-//        dht22_buffer <= 1'bz;   
-//    end 
-//    else begin
-//        case (cur_state)
-//               //Delay for 1 second after power-on and wait for DHT22 to stabilize
-//            st_power_on_wait : begin                
-//                if(us_cnt < POWER_ON_NUM) begin
-//                    dht22_buffer <= 1'bz;//release the bus idle state
-//                    us_cnt_clr <= 1'b0;
-//                end
-//                else begin            
-//                    next_state   <= st_low_500us;
-//                    us_cnt_clr   <= 1'b1;
-//                end
-//            end
-//               //FPGA sends start signal (low level of 500us)    
-//            st_low_500us: begin
-//                if(us_cnt <500) begin
-//                    dht22_buffer <= 1'b0;//start signal is low
-//                    us_cnt_clr    <= 1'b0;
-//                end
-//                else begin
-//                    dht22_buffer <= 1'bz;//release the bus after the start signal
-//                    next_state    <= st_high_40us;
-//                    us_cnt_clr   <= 1'b1;
-//                end    
-//            end 
-//               //Waiting for the response signal of DHT22 (waiting 20~40us)
-//            st_high_40us:begin                      
-//                if (us_cnt <40) begin
-//                    us_cnt_clr <= 1'b0;
-//                    if(dht22_neg) begin//detected response signal DHT22
-//                        next_state <= st_rec_low_83us;
-//                        us_cnt_clr <= 1 'b1;
-//                    end
-//                end
-//                else//No response over 40us
-//                    next_state <= st_delay;
-//            end 
-//               //Wait for the 83us low level response signal of DHT22 to end
-//            st_rec_low_83us: begin                  
-//                if(dht22_pos)                   
-//                    next_state <= st_rec_high_87us;  
-//            end 
-//               //DHT22 pulls up 87us to notify FPGA that it is ready to receive data
-//            st_rec_high_87us: begin
-//                if(dht22_neg) begin//The preparation time is over    
-//                    next_state <= st_rec_data; 
-//                    us_cnt_clr <= 1'b1;
-//                end
-//                else begin//High level ready to receive data
-//                    data_cnt   <= 6'd0;
-//                    data_temp <= 40'd0;
-//                    step  <= 1'b0;
-//                end
-//            end 
-//               //Continuously receive 40 bits of data 
-//            st_rec_data: begin                                
-//                case(step)
-//                    0: begin//Receive data low level
-//                        if(dht22_pos) begin 
-//                            step <= 1'b1;
-//                            us_cnt_clr <= 1'b1;
-//                        end            
-//                        else//Wait for the end of data low level
-//                            us_cnt_clr <= 1'b0;
-//                    end
-//                    1: begin//receive data high level
-//                        if (dht22_neg) begin 
-//                            data_cnt <= data_cnt + 1;
-//                                         //Judging that the received data is 0/1
-//                            if(us_cnt <60)
-//                                data_temp <= {data_temp[38:0],1'b0};
-//                            else                
-//                                data_temp <= {data_temp[38:0],1'b1};
-//                            step <= 1'b0;
-//                            us_cnt_clr <= 1'b1;
-//                        end 
-//                        else//Wait for the end of the data high level
-//                            us_cnt_clr <= 1 'b0;
-//                    end
-//                endcase
-//                
-//                if(data_cnt == 40) begin//data transmission is over, verify check digit
-//                    next_state <= st_delay;
-//                    if(data_temp[7:0] == data_temp[39:32] + data_temp[31:24] + data_temp[23:16] + data_temp[15:8])
-//                        data_out <= data_temp[39:8];  
-//                end
-//            end 
-//               //Delay 2s after completing a data collection
-//            st_delay:begin
-//                if (us_cnt < 2000_000)
-//                    us_cnt_clr <= 1'b0;
-//                else begin//Resend the start signal after the delay is over
-//                    next_state <= st_low_500us;      
-//                    us_cnt_clr <= 1'b1;
-//                end
-//            end
-//            default : ;
-//        endcase
-//    end 
-//end
-//
-//endmodule   
+//COMBINED
 
 `timescale 1ns / 1ps
 //////////////////////////////////////////////////////////////////////////////////
@@ -223,16 +22,11 @@
 //////////////////////////////////////////////////////////////////////////////////
 module temp(
 	 input CLK,  //100 MHz
-//    input EN,
     input RST,
     inout DHT_DATA,
 	 output OUT,
-//	 output [7:0] HUM_INT,
-//	 output [7:0] HUM_FLOAT,
-    output [7:0] TEMP_INT
-//	 output [7:0] TEMP_FLOAT,
-//	 output [7:0] CRC,
-//	 output WAITC
+    output [7:0] TEMP_INT,
+	 input [1:0] calorie, pressure, air_pressure
     );
 
 
@@ -255,18 +49,23 @@ module temp(
 	assign TEMP_INT[5] = INTDATA[21];
 	assign TEMP_INT[6] = INTDATA[22];
 	assign TEMP_INT[7] = INTDATA[23];
-	assign OUT = INTDATA[20];
+	assign OUT = FAN;
 
 	 reg [3:0] STATE;
 	 
 	 //Definição de estados
-	 parameter S0=0, S1=1, S2=2, S3=3, S4=4, S5=5, S6=6, S7=7, S8=8, S9=9, STOP=10;
+
+
+
+	 parameter S0=0, S1=1, S2=2, S3=3, S4=4, S5=5, S6=6, S7=7, S8=8, S9=9, STOP=10,S11=11,S12=12,S13=13,S14=14,START=15;
+	 parameter air_pressure_threshold = 1, calorie_threshold = 1, temperature_threshold = 1, pressure_threshold = 1;
+	 parameter sec1 =1, sec2 =2, sec3 =3, sec4 =4, sec5 =5, sec6 =6, sec7 =7;
 
  
 	//Processo de FSM 
 	always @(posedge CLK)
 	begin: FSM
-	$display("Hey");
+
 //	  if (EN == 1'b1)
 //	  begin
 		 if ( RST == 1'b1)
@@ -275,11 +74,32 @@ module temp(
 			  WAIT <= 1'b0;
 			  COUNTER <= 0;	
 			  DIR <= 1'b1;			   //Configura pino saida
-			  STATE <= S0;
+			  STATE <= START;
 			  index <= 0;
 		 end else begin
 		 
 			 case (STATE)
+			 	START:
+			 		if(calorie > calorie_threshold)
+  		            begin
+  		                if(COUNTER < sec2)
+  		                  begin
+  		                    STATE<= START;
+  		                    COUNTER <= COUNTER +1;
+  		                  end
+                  		else
+                    	begin
+                	      STATE <= S0;
+                	      COUNTER <= 0;
+                	    end
+                	end
+     	    	 	else
+        		    begin
+            		  STATE <= START;
+            		  COUNTER <=0;
+            		end
+          
+          
 				 S0:
 					 begin
 					   DIR <= 1'b1;	
@@ -407,14 +227,82 @@ module temp(
 				 
 				 STOP:
 					begin
-						STATE <= STOP;
 						if (INTDATA[20] == 1 || INTDATA[21] == 1 || INTDATA[22] == 1 || INTDATA[23] == 1)
 						begin
 							FAN <= 1;
 						end else begin
 							FAN <= 0;
 						end
+
+						STATE <= S11;
 					end
+
+				
+          
+          S11:if(pressure < pressure_threshold)
+                begin
+                  if(COUNTER < sec5)
+                    begin
+                      STATE <= S3;
+                      COUNTER <= COUNTER+1;
+                      end
+                  else
+                    begin
+                      COUNTER <=S12;
+                      COUNTER <= 0;
+                    end
+                end
+          else
+            begin
+              STATE <= S3;
+              COUNTER <= 0;
+            end
+          
+          S12:if(air_pressure > air_pressure_threshold)
+                begin
+                  if(COUNTER < sec2)
+                    begin
+                      STATE <= S12;
+                      COUNTER <= COUNTER +1;
+                      end
+                  else
+                    begin
+                      STATE <= S12;
+                      COUNTER <= 0;
+                    end
+                end
+          	 else
+                begin
+                   STATE <= S13;
+                   COUNTER <= 0;
+                end
+          
+          S13:if(air_pressure > air_pressure_threshold)
+            begin
+              if(COUNTER < sec3)
+                begin
+                  STATE <= S13;
+                  COUNTER <= COUNTER+1;
+                end
+              else
+                begin
+                  STATE <= S12;
+                  COUNTER <= 0;
+                end
+            end
+          else
+            begin
+              if(COUNTER < sec3)
+                begin
+                  STATE <= S13;
+                  COUNTER <= COUNTER +1;
+                end
+              else
+                begin
+                  STATE <= S11;
+                  COUNTER <= 0;
+                end
+            end
 			 endcase
 		end
 //	end
